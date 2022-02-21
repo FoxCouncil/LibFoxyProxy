@@ -9,7 +9,7 @@ public class HttpProxy : Listener
 {
     public static readonly string ApplicationVersion = typeof(HttpProxy).Assembly.GetName().Version?.ToString() ?? "NA";
 
-    static Dictionary<HttpStatusCode, string> ErrorPages = new ()
+    static Dictionary<HttpStatusCode, string> ErrorPages = new()
     {
 #pragma warning disable CS8604 // Possible null reference argument.
         { HttpStatusCode.NotFound, new StreamReader(typeof(HttpProxy).Assembly.GetManifestResourceStream("LibFoxyProxy.Http.www.errors.404.html")).ReadToEnd() },
@@ -19,9 +19,9 @@ public class HttpProxy : Listener
 
     public Encoding Encoding { get; set; } = Encoding.UTF8;
 
-    public event Func<HttpRequest, HttpResponse>? Request; 
+    public event Func<HttpRequest, HttpResponse?>? Request;
 
-    public HttpProxy(IPAddress listenAddress, int port) : base(listenAddress, port, SocketType.Stream, ProtocolType.Tcp) {}
+    public HttpProxy(IPAddress listenAddress, int port) : base(listenAddress, port, SocketType.Stream, ProtocolType.Tcp) { }
 
     internal override async void ProcessRequest(Socket? connection, byte[] data, int read)
     {
@@ -43,7 +43,14 @@ public class HttpProxy : Listener
 
         if (httpResponse != null)
         {
-            await connection.SendAsync(httpResponse.GetBytes(), SocketFlags.None);
+            try
+            {
+                await connection.SendAsync(httpResponse.GetResponseEncodedData(), SocketFlags.None);
+            }
+            catch (SocketException)
+            {
+                // ignore.
+            }
         }
 
         // TODO: Keep-Alive respect?
@@ -62,12 +69,7 @@ public class HttpProxy : Listener
         {
             var plainBody = $"{(int)statusCode} {statusCode}\n\n{httpRequest.Uri}\n\n{date}{string.Join("", Enumerable.Repeat("\n" + string.Join("", Enumerable.Repeat(" ", 80)), 20))}";
 
-            httpResponse.Headers.Add(HttpHeaderName.ContentType, HttpContentType.Text.Plain);
-            httpResponse.Headers.Add(HttpHeaderName.ContentLength, plainBody.Length.ToString());
-
-            httpResponse.Body = plainBody;
-
-            return httpResponse;
+            return httpResponse.SetBodyString(plainBody, HttpContentType.Text.Plain);
         }
 
         var body = ErrorPages[statusCode];
@@ -77,11 +79,6 @@ public class HttpProxy : Listener
         body = body.Replace("||HOST||", httpRequest.Socket?.LocalEndPoint?.ToString());
         body = body.Replace("||DATE||", date);
 
-        httpResponse.Headers.Add(HttpHeaderName.ContentType, HttpContentType.Text.Html);
-        httpResponse.Headers.Add(HttpHeaderName.ContentLength, body.Length.ToString());
-
-        httpResponse.Body = body;
-
-        return httpResponse;
+        return httpResponse.SetBodyString(body, HttpContentType.Text.Html);
     }
 }

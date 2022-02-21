@@ -12,11 +12,11 @@ public sealed class HttpResponse
 
     public string Version { get; internal set; } = "HTTP/1.1";
 
-    public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.OK;
+    public HttpStatusCode StatusCode { get; internal set; } = HttpStatusCode.OK;
 
-    public Dictionary<string, string> Headers { get; internal set; } = new ();
+    public Dictionary<string, string> Headers { get; internal set; } = new();
 
-    public string Body { get; set; } = "";
+    public byte[] Body { get; internal set; }
 
     public HttpResponse(HttpRequest request)
     {
@@ -25,7 +25,38 @@ public sealed class HttpResponse
         Version = request.Version;
     }
 
-    public byte[] GetBytes()
+    public HttpResponse SetBodyString(string body, string type = HttpContentType.Text.Html)
+    {
+        SetBodyData(Encoding.GetBytes(body), type);
+
+        return this;
+    }
+
+    public HttpResponse SetBodyData(byte[] body, string type = HttpContentType.Application.OctetStream)
+    {
+        Body = body ?? throw new ArgumentNullException(nameof(body));
+
+        Headers.AddOrUpdate(HttpHeaderName.ContentLength, Body.Length.ToString());
+        Headers.AddOrUpdate(HttpHeaderName.ContentType, type);
+
+        return this;
+    }
+
+    public HttpResponse SetEncoding(Encoding encoding)
+    {
+        Encoding = encoding;
+
+        return this;
+    }
+
+    public HttpResponse SetOk()
+    {
+        StatusCode = HttpStatusCode.OK;
+
+        return this;
+    }
+
+    public byte[] GetResponseEncodedData()
     {
         var outputBuilder = new StringBuilder();
 
@@ -36,12 +67,12 @@ public sealed class HttpResponse
             outputBuilder.Append($"{header.Key}: {header.Value}{HttpSeperator}");
         }
 
-        outputBuilder.Append($"{HttpHeaderName.Server}: FoxyProxy/{HttpProxy.ApplicationVersion}{HttpSeperator}"); // Fuck them
+        outputBuilder.Append($"{HttpHeaderName.Server}: LibFoxyProxy/{HttpProxy.ApplicationVersion}"); // Fuck them
 
         outputBuilder.Append(HttpBodySeperator);
 
-        outputBuilder.Append(Body);
+        var headerData = Encoding.GetBytes(outputBuilder.ToString());
 
-        return Encoding.GetBytes(outputBuilder.ToString());
+        return headerData.Concat(Body).ToArray();
     }
 }

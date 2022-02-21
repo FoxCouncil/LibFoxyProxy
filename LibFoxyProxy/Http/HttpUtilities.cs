@@ -32,6 +32,8 @@ namespace LibFoxyProxy.Http
             public static class Application
             {
                 public const string Json = "application/json";
+
+                public const string OctetStream = "application/octet-stream";
             }
 
             public static class Text
@@ -39,6 +41,28 @@ namespace LibFoxyProxy.Http
                 public const string Html = "text/html";
 
                 public const string Plain = "text/plain";
+            }
+        }
+
+        public static void AddOrUpdate<TKey, TValue>(this Dictionary<TKey, TValue> dict, TKey key, TValue value) where TKey : notnull
+        {
+            if (dict == null)
+            {
+                throw new ArgumentNullException(nameof(dict));
+            }
+
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+
+            if (dict.ContainsKey(key))
+            {
+                dict[key] = value;
+            }
+            else
+            {
+                dict.Add(key, value);
             }
         }
     }
