@@ -2,37 +2,53 @@
 using System.Net.Sockets;
 using System.Text;
 using static LibFoxyProxy.Http.HttpUtilities;
+using FoxyProxyHttpProcessDelegate = System.Func<LibFoxyProxy.Http.HttpRequest, LibFoxyProxy.Http.HttpResponse, System.Threading.Tasks.Task<bool>>;
 
 namespace LibFoxyProxy.Http;
 
 public class HttpProxy : Listener
 {
-    public static readonly string ApplicationVersion = typeof(HttpProxy).Assembly.GetName().Version?.ToString() ?? "NA";
-
-    static Dictionary<HttpStatusCode, string> ErrorPages = new()
+    static readonly Dictionary<HttpStatusCode, string> ErrorPages = new()
     {
-#pragma warning disable CS8604 // Possible null reference argument.
         { HttpStatusCode.NotFound, new StreamReader(typeof(HttpProxy).Assembly.GetManifestResourceStream("LibFoxyProxy.Http.www.errors.404.html")).ReadToEnd() },
         { HttpStatusCode.InternalServerError, new StreamReader(typeof(HttpProxy).Assembly.GetManifestResourceStream("LibFoxyProxy.Http.www.errors.500.html")).ReadToEnd() }
-#pragma warning restore CS8604 // Possible null reference argument.
     };
+
+    public static readonly string ApplicationVersion = typeof(HttpProxy).Assembly.GetName().Version?.ToString() ?? "NA";
+
+    public readonly List<FoxyProxyHttpProcessDelegate> Handlers = new();
 
     public Encoding Encoding { get; set; } = Encoding.UTF8;
 
-    public event Func<HttpRequest, HttpResponse?>? Request;
-
     public HttpProxy(IPAddress listenAddress, int port) : base(listenAddress, port, SocketType.Stream, ProtocolType.Tcp) { }
 
-    internal override async void ProcessRequest(Socket? connection, byte[] data, int read)
+    public HttpProxy Use(FoxyProxyHttpProcessDelegate delegateFunc)
+    {
+        Handlers.Add(delegateFunc);
+
+        return this;
+    }
+
+    internal override async void ProcessRequest(Socket connection, byte[] data, int read)
     {
         var httpRequest = HttpRequest.Parse(connection, Encoding, data[..read]);
 
-        var httpResponse = Request?.Invoke(httpRequest);
+        var httpResponse = new HttpResponse(httpRequest);
 
-        if (httpResponse == null)
+        var handled = false;
+
+        foreach (var handler in Handlers)
+        {
+            if (handled = await handler(httpRequest, httpResponse))
+            {
+                break;
+            }
+        }
+
+        if (!handled)
         {
             // TODO: Add Error Handling...
-            httpResponse = ProcessErrorResponse(httpRequest, HttpStatusCode.NotFound);
+            handled = ProcessErrorResponse(httpRequest, httpResponse, HttpStatusCode.NotFound);
         }
 
         if (connection == null)
@@ -41,7 +57,7 @@ public class HttpProxy : Listener
             return;
         }
 
-        if (httpResponse != null)
+        if (handled)
         {
             try
             {
@@ -57,9 +73,9 @@ public class HttpProxy : Listener
         connection.Close();
     }
 
-    private static HttpResponse? ProcessErrorResponse(HttpRequest httpRequest, HttpStatusCode statusCode)
+    private static bool ProcessErrorResponse(HttpRequest httpRequest, HttpResponse httpResponse, HttpStatusCode statusCode)
     {
-        var httpResponse = new HttpResponse(httpRequest) { StatusCode = statusCode };
+        httpResponse.SetStatusCode(statusCode);
 
         var date = DateTime.UtcNow.ToUniversalTime().ToString("R");
 
@@ -69,7 +85,9 @@ public class HttpProxy : Listener
         {
             var plainBody = $"{(int)statusCode} {statusCode}\n\n{httpRequest.Uri}\n\n{date}{string.Join("", Enumerable.Repeat("\n" + string.Join("", Enumerable.Repeat(" ", 80)), 20))}";
 
-            return httpResponse.SetBodyString(plainBody, HttpContentType.Text.Plain);
+            httpResponse.SetBodyString(plainBody, HttpContentType.Text.Plain);
+
+            return true;
         }
 
         var body = ErrorPages[statusCode];
@@ -79,6 +97,8 @@ public class HttpProxy : Listener
         body = body.Replace("||HOST||", httpRequest.Socket?.LocalEndPoint?.ToString());
         body = body.Replace("||DATE||", date);
 
-        return httpResponse.SetBodyString(body, HttpContentType.Text.Html);
+        httpResponse.SetBodyString(body, HttpContentType.Text.Html);
+
+        return true;
     }
 }

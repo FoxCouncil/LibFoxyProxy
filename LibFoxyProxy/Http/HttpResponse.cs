@@ -6,22 +6,24 @@ namespace LibFoxyProxy.Http;
 
 public sealed class HttpResponse
 {
-    public Socket? Socket { get; private set; }
+    public HttpRequest Request { get; private set; }
+
+    public Socket Socket => Request.Socket;
 
     public Encoding Encoding { get; private set; } = Encoding.UTF8;
 
-    public string Version { get; internal set; } = "HTTP/1.1";
+    public string Version { get; private set; } = "HTTP/1.1";
 
-    public HttpStatusCode StatusCode { get; internal set; } = HttpStatusCode.OK;
+    public HttpStatusCode StatusCode { get; private set; } = HttpStatusCode.OK;
 
-    public Dictionary<string, string> Headers { get; internal set; } = new();
+    public Dictionary<string, string> Headers { get; private set; } = new();
 
     public byte[] Body { get; internal set; }
 
     public HttpResponse(HttpRequest request)
     {
+        Request = request;
         Encoding = request.Encoding ?? Encoding.UTF8;
-        Socket = request.Socket;
         Version = request.Version;
     }
 
@@ -49,9 +51,23 @@ public sealed class HttpResponse
         return this;
     }
 
+    public HttpResponse SetStatusCode(HttpStatusCode statusCode)
+    {
+        StatusCode = statusCode;
+
+        return this;
+    }
+
     public HttpResponse SetOk()
     {
         StatusCode = HttpStatusCode.OK;
+
+        return this;
+    }
+
+    public HttpResponse SetNotFound()
+    {
+        StatusCode = HttpStatusCode.NotFound;
 
         return this;
     }
@@ -73,6 +89,11 @@ public sealed class HttpResponse
 
         var headerData = Encoding.GetBytes(outputBuilder.ToString());
 
-        return headerData.Concat(Body).ToArray();
+        if (Body != null && Body.Length > 0)
+        {
+            return headerData.Concat(Body).ToArray();
+        }
+
+        return headerData;
     }
 }
