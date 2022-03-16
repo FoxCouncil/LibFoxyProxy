@@ -20,6 +20,10 @@ public sealed class HttpResponse
 
     public byte[] Body { get; internal set; }
 
+    public bool Cache { get; set; } = true;
+
+    public TimeSpan CacheTtl { get; set; } = TimeSpan.FromMinutes(60);
+
     public HttpResponse(HttpRequest request)
     {
         Request = request;

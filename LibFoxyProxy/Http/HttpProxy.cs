@@ -1,10 +1,18 @@
-﻿using System.Net;
+using System.Diagnostics;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using static LibFoxyProxy.Http.HttpUtilities;
 using FoxyProxyHttpProcessDelegate = System.Func<LibFoxyProxy.Http.HttpRequest, LibFoxyProxy.Http.HttpResponse, System.Threading.Tasks.Task<bool>>;
 
 namespace LibFoxyProxy.Http;
+
+public interface ICacheDb
+{
+    public T Get<T>(string key);
+
+    public void Set<T>(string key, TimeSpan ttl, T value);
+}
 
 public class HttpProxy : Listener
 {
@@ -20,6 +28,8 @@ public class HttpProxy : Listener
 
     public Encoding Encoding { get; set; } = Encoding.UTF8;
 
+    public ICacheDb CacheDb { get; set; }
+
     public HttpProxy(IPAddress listenAddress, int port) : base(listenAddress, port, SocketType.Stream, ProtocolType.Tcp) { }
 
     public HttpProxy Use(FoxyProxyHttpProcessDelegate delegateFunc)
@@ -29,44 +39,69 @@ public class HttpProxy : Listener
         return this;
     }
 
-    internal override async void ProcessRequest(Socket connection, byte[] data, int read)
+    internal override async Task ProcessRequest(Socket connection, byte[] data, int read)
     {
         var httpRequest = HttpRequest.Parse(connection, Encoding, data[..read]);
 
         var httpResponse = new HttpResponse(httpRequest);
 
-        var handled = false;
+        var key = $"PC-{httpRequest.Uri}";
 
-        foreach (var handler in Handlers)
+        var cachedResponse = CacheDb?.Get<string>(key);
+
+        if (cachedResponse == null)
         {
-            if (handled = await handler(httpRequest, httpResponse))
+            Console.WriteLine("Cache MISS: " + key);
+
+            var handled = false;
+
+            foreach (var handler in Handlers)
             {
-                break;
+                if (handled = await handler(httpRequest, httpResponse))
+                {
+                    break;
+                }
+            }
+
+            if (!handled)
+            {
+                // TODO: Add Error Handling...
+                handled = ProcessErrorResponse(httpRequest, httpResponse, HttpStatusCode.NotFound);
+            }
+
+            if (connection == null)
+            {
+                // Nothing to send too..
+                return;
+            }
+
+            if (handled)
+            {
+                try
+                {
+                    var buffer = httpResponse.GetResponseEncodedData();
+
+                    if (httpResponse.Cache)
+                    {
+                        CacheDb?.Set<string>(key, httpResponse.CacheTtl, Convert.ToBase64String(buffer));
+                    }
+
+                    await connection.SendAsync(buffer, SocketFlags.None);
+                }
+                catch (Exception) { }
             }
         }
-
-        if (!handled)
+        else
         {
-            // TODO: Add Error Handling...
-            handled = ProcessErrorResponse(httpRequest, httpResponse, HttpStatusCode.NotFound);
-        }
+            Console.WriteLine("Cache  HIT: " + key);
 
-        if (connection == null)
-        {
-            // Nothing to send too..
-            return;
-        }
-
-        if (handled)
-        {
             try
             {
-                await connection.SendAsync(httpResponse.GetResponseEncodedData(), SocketFlags.None);
+                var buffer = Convert.FromBase64String(cachedResponse);
+
+                await connection.SendAsync(buffer, SocketFlags.None);
             }
-            catch (SocketException)
-            {
-                // ignore.
-            }
+            catch (Exception) { }
         }
 
         // TODO: Keep-Alive respect?

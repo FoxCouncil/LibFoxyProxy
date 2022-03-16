@@ -74,7 +74,7 @@ public abstract class Listener
                             break;
                         }
 
-                        ProcessRequest(connection, buffer, read);
+                        await ProcessRequest(connection, buffer, read);
                     }
                 }
                 catch (Exception)
@@ -95,7 +95,8 @@ public abstract class Listener
         IsListening = false;
     }
 
-    internal virtual void ProcessRequest(Socket? connection, byte[] data, int read)
+    internal virtual Task ProcessRequest(Socket? connection, byte[] data, int read)
     {
+        return Task.CompletedTask;
     }
 }
