@@ -1,10 +1,17 @@
-﻿using System.Net;
+﻿using LibFoxyProxy.Security;
+using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 
 namespace LibFoxyProxy;
 
 public abstract class Listener
 {
+    public bool IsSecure { get; }
+
+    public SslContext SecurityContext { get; }
+
     public bool IsListening { get; internal set; }
 
     public IPAddress Address { get; private set; }
@@ -17,12 +24,27 @@ public abstract class Listener
 
     public Thread ProcessThread { get; private set; }
 
-    public Listener(IPAddress listenAddress, int port, SocketType type, ProtocolType protocol)
+    public Listener(IPAddress listenAddress, int port, SocketType type, ProtocolType protocol, bool secure = false)
     {
         Address = listenAddress;
         Port = port;
         SocketType = type;
         ProtocolType = protocol;
+        IsSecure = secure;
+
+        if (IsSecure)
+        {
+            SecurityContext = new SslContext();
+
+            // Don't want to verify the client certs in this instance...
+            SecurityContext.SetVerify(false);
+
+            SecurityContext.SetCipherList("ALL:eNULL");
+
+            // Setup Security Certificate Store
+            SecurityContext.SetCertificateChain("Certs/dialnine.com.crt");
+            SecurityContext.SetPrivateKeyFile("Certs/dialnine.com.key");
+        }
     }
 
     public void Start()
@@ -46,57 +68,133 @@ public abstract class Listener
 
         socket.Listen();
 
-        Console.WriteLine("Starting server...");
+        Console.WriteLine($"Starting Listener...{Address}:{Port}");
 
         while (IsListening)
         {
-            var connection = await socket.AcceptAsync();
+            Socket connection;
+
+            try
+            {
+                connection = await socket.AcceptAsync();
+            }
+            catch (SocketException)
+            {
+                // Ignore
+                break;
+            }
 
             _ = Task.Run(async () =>
             {
-                Console.WriteLine("Connection Accepted");
+                var reqBuffer = new byte[4096];
 
-                var buffer = new byte[4096];
+                SslStream sslStream = null;
 
-                try
+                if (IsSecure)
                 {
-                    while (true)
+                    int read = await connection.ReceiveAsync(reqBuffer, SocketFlags.None);
+
+                    if (read == 0)
+                    {
+                        // Bail!
+                        connection.Close();
+
+                        return;
+                    }
+
+                    var rawPacket = Encoding.ASCII.GetString(reqBuffer, 0, read);
+
+                    // The Client is asking us to forward the connection.
+                    if (rawPacket.StartsWith("CONNECT"))
+                    {
+                        // We need to fake it...
+                        await connection.SendAsync(Encoding.ASCII.GetBytes("HTTP/1.0 200 Connection Established\r\n\r\n"), SocketFlags.None);
+                        
+                    }
+
+                    var networkStream = new NetworkStream(connection);
+                    
+                    sslStream = new SslStream(SecurityContext, networkStream);
+
+                    sslStream.AuthenticateAsServer();
+                }
+
+                var listenerSocket = new ListenerSocket
+                {
+                    IsSecure = IsSecure,
+                    RawSocket = connection,
+                    SecureStream = sslStream
+                };
+
+                if (connection.Connected)
+                {
+                    var connectionBuffer = await ProcessConnection(listenerSocket);
+
+                    if (connectionBuffer != null)
+                    {
+                        if (IsSecure)
+                        {
+                            await sslStream.WriteAsync(connectionBuffer);
+                        }
+                        else
+                        {
+                            await connection.SendAsync(connectionBuffer, SocketFlags.None);
+                        }
+                    }
+                }
+
+                while (true)
+                {
+                    try
                     {
                         if (!connection.Connected)
                         {
                             break;
                         }
 
-                        int read = await connection.ReceiveAsync(buffer, SocketFlags.None);
+                        int read = IsSecure ? await sslStream.ReadAsync(reqBuffer) : await connection.ReceiveAsync(reqBuffer, SocketFlags.None);
 
-                        if (read == 0)
+                        if (read <= 0)
                         {
                             break;
                         }
 
-                        await ProcessRequest(connection, buffer, read);
+                        var resBuffer = await ProcessRequest(listenerSocket, reqBuffer, read);
+
+                        if (IsSecure)
+                        {
+                            await sslStream.WriteAsync(resBuffer);
+                            
+                            sslStream.Dispose();
+                        }
+                        else
+                        {
+                            await connection.SendAsync(resBuffer, SocketFlags.None);
+                        }
+
+                        connection.Close();
+                    }
+                    catch (SocketException sex) { /* Ignore */ Console.WriteLine(sex.Message); }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Connection Exception: \n\n" + ex.Message);
                     }
                 }
-                catch (Exception)
-                {
-                    Console.WriteLine("Connection Exception");
-                }
-                finally
-                {
-                    connection.Dispose();
-                }
-
-                Console.WriteLine("Connection Closed");
             });
         }
 
-        Console.WriteLine("Stopping server...");
+        Console.WriteLine("Stopping Listener...");
 
         IsListening = false;
     }
 
-    internal virtual Task ProcessRequest(Socket? connection, byte[] data, int read)
+    internal virtual Task<byte[]> ProcessRequest(ListenerSocket connection, byte[] data, int read)
     {
-        return Task.CompletedTask;
+        return Task.FromResult<byte[]>(null);
+    }
+
+    internal virtual Task<byte[]> ProcessConnection(ListenerSocket connection)
+    {
+        return Task.FromResult<byte[]>(null);
     }
 }

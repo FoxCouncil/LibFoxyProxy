@@ -8,6 +8,7 @@
 		<VersionSuffix>0.1.2.7</VersionSuffix>
 		<AssemblyVersion>$(VersionSuffix)</AssemblyVersion>
 		<Version>$(VersionSuffix)</Version>
+		<PlatformTarget>x64</PlatformTarget>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -18,6 +19,19 @@
 	<ItemGroup>
 		<EmbeddedResource Include="Http\www\errors\404.html" />
 		<EmbeddedResource Include="Http\www\errors\500.html" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <PackageReference Include="System.Text.Encoding.CodePages" Version="6.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Update="libeay32.dll">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
+	  <None Update="ssleay32.dll">
+	    <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+	  </None>
 	</ItemGroup>
 
 </Project>

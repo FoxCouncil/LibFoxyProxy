@@ -8,7 +8,7 @@ public sealed class HttpResponse
 {
     public HttpRequest Request { get; private set; }
 
-    public Socket Socket => Request.Socket;
+    public Socket Socket => Request.ListenerSocket.RawSocket;
 
     public Encoding Encoding { get; private set; } = Encoding.UTF8;
 
@@ -72,6 +72,15 @@ public sealed class HttpResponse
     public HttpResponse SetNotFound()
     {
         StatusCode = HttpStatusCode.NotFound;
+
+        return this;
+    }
+
+    public HttpResponse SetFound(string foundUri)
+    {
+        StatusCode = HttpStatusCode.Found;
+
+        Headers.AddOrUpdate(HttpHeaderName.Location, foundUri);
 
         return this;
     }

@@ -12,7 +12,7 @@ namespace LibFoxyProxy.Http
 
         public static readonly string HttpBodySeperator = "\r\n\r\n";
 
-        public static readonly IReadOnlyList<string> HttpVerbs = new List<string> { "GET", "POST" }; // TODO: Extend to all!
+        public static readonly IReadOnlyList<string> HttpVerbs = new List<string> { "HEAD", "GET", "POST" }; // TODO: Extend to all!
 
         public static readonly IReadOnlyList<string> HttpVersions = new List<string> { "HTTP/1.0", "HTTP/1.1" };
 
@@ -25,6 +25,12 @@ namespace LibFoxyProxy.Http
             public const string Date = "Date";
 
             public const string Server = "Server";
+
+            public const string Location = "Location";
+
+            public const string UserAgent = "User-Agent";
+
+            public const string Host = "Host";
         }
 
         public static class HttpContentType

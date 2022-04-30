@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -30,7 +29,7 @@ public class HttpProxy : Listener
 
     public ICacheDb CacheDb { get; set; }
 
-    public HttpProxy(IPAddress listenAddress, int port) : base(listenAddress, port, SocketType.Stream, ProtocolType.Tcp) { }
+    public HttpProxy(IPAddress listenAddress, int port, bool secure) : base(listenAddress, port, SocketType.Stream, ProtocolType.Tcp, secure) { }
 
     public HttpProxy Use(FoxyProxyHttpProcessDelegate delegateFunc)
     {
@@ -39,7 +38,7 @@ public class HttpProxy : Listener
         return this;
     }
 
-    internal override async Task ProcessRequest(Socket connection, byte[] data, int read)
+    internal override async Task<byte[]> ProcessRequest(ListenerSocket connection, byte[] data, int read)
     {
         var httpRequest = HttpRequest.Parse(connection, Encoding, data[..read]);
 
@@ -51,7 +50,7 @@ public class HttpProxy : Listener
 
         if (cachedResponse == null)
         {
-            Console.WriteLine("Cache MISS: " + key);
+            // Console.WriteLine("Cache MISS: " + key);
 
             var handled = false;
 
@@ -72,7 +71,7 @@ public class HttpProxy : Listener
             if (connection == null)
             {
                 // Nothing to send too..
-                return;
+                return null;
             }
 
             if (handled)
@@ -86,26 +85,28 @@ public class HttpProxy : Listener
                         CacheDb?.Set<string>(key, httpResponse.CacheTtl, Convert.ToBase64String(buffer));
                     }
 
-                    await connection.SendAsync(buffer, SocketFlags.None);
+                    return buffer;
                 }
                 catch (Exception) { }
             }
         }
         else
         {
-            Console.WriteLine("Cache  HIT: " + key);
+            // Console.WriteLine("Cache  HIT: " + key);
 
             try
             {
-                var buffer = Convert.FromBase64String(cachedResponse);
+                Console.WriteLine($"[{"Proxy Cached",15} Request] ({httpRequest.Uri}) [N/A]");
 
-                await connection.SendAsync(buffer, SocketFlags.None);
+                return Convert.FromBase64String(cachedResponse);               
             }
             catch (Exception) { }
         }
 
         // TODO: Keep-Alive respect?
-        connection.Close();
+        connection.RawSocket.Close();
+
+        return null;
     }
 
     private static bool ProcessErrorResponse(HttpRequest httpRequest, HttpResponse httpResponse, HttpStatusCode statusCode)
@@ -129,10 +130,13 @@ public class HttpProxy : Listener
 
         body = body.Replace("||REQUEST||", httpRequest.Uri?.ToString());
         body = body.Replace("||VERSION||", ApplicationVersion);
-        body = body.Replace("||HOST||", httpRequest.Socket?.LocalEndPoint?.ToString());
+        body = body.Replace("||HOST||", httpRequest.ListenerSocket.RawSocket.LocalEndPoint?.ToString());
         body = body.Replace("||DATE||", date);
 
         httpResponse.SetBodyString(body, HttpContentType.Text.Html);
+
+        // Do not cache the error!
+        httpResponse.Cache = false;
 
         return true;
     }

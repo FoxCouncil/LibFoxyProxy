@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
@@ -22,11 +23,21 @@ public sealed class HttpRequest
 
     public string Body { get; private set; } = "";
 
-    public Socket? Socket { get; private set; }
+    public ListenerSocket? ListenerSocket { get; private set; }
 
     public Encoding? Encoding { get; private set; }
 
-    internal static HttpRequest Parse(Socket? socket, Encoding encoding, byte[] rawBytes)
+    public bool IsRelativeUri(string uri)
+    {
+        if (uri == null || uri.Length == 0)
+        {
+            return false;
+        }
+
+        return Uri.AbsolutePath.ToLower().Equals(uri);
+    }
+
+    internal static HttpRequest Parse(ListenerSocket socket, Encoding encoding, byte[] rawBytes)
     {
         if (socket == null || rawBytes == null)
         {
@@ -60,21 +71,31 @@ public sealed class HttpRequest
             if (string.IsNullOrWhiteSpace(header))
             {
                 continue;
-            }    
+            }
 
             var splitHeaderKV = header.Split(": ", 2);
 
-            headers.Add(splitHeaderKV[0], splitHeaderKV[1]);
+            if (!headers.ContainsKey(splitHeaderKV[0]))
+            {
+                headers.Add(splitHeaderKV[0], splitHeaderKV[1]);
+            }
+        }
+
+        var uri = httpRequestLine[1];
+
+        if (!uri.StartsWith("http") && headers.ContainsKey(HttpHeaderName.Host))
+        {
+            uri = (socket.IsSecure ? "https" : "http") + "://" + headers[HttpHeaderName.Host] + uri;
         }
 
         var newRequest = new HttpRequest
         {
             Type = httpRequestLine[0],
-            Uri = new Uri(httpRequestLine[1]),
+            Uri = new Uri(uri),
             Version = httpRequestLine[2],
             Headers = headers,
             Body = rawBody,
-            Socket = socket,
+            ListenerSocket = socket,
             Encoding = encoding
         };
 
